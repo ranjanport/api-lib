@@ -1,6 +1,4 @@
 import sys, os, json
-
-from sqlalchemy import true
 sys.path.append("..")
 
 from fastapi import APIRouter, Request, status, Response
