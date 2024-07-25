@@ -1,12 +1,12 @@
-import sys, os, json
+import sys, os, json, copy
 sys.path.append("..")
 
-from fastapi import APIRouter, Request, status, Response
+from fastapi import APIRouter, Request, status, BackgroundTasks
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
 from models.common import *
-from utils.utils import create_jwt, verify_password, do_password_hash, decode_jwt_token
+from utils.utils import create_jwt, verify_password, do_password_hash, decode_jwt_token, generate_verification_link, send_verification_email
 from utils.db import *
 
 load_dotenv()
@@ -15,7 +15,7 @@ load_dotenv()
 authRouter = APIRouter(tags=["Auth"], prefix="/api/auth")
 
 @authRouter.post("/login")
-async def login(user_data: User, request: Request, db = Depends(get_db)):
+async def login(user_data: User, request: Request,  db = Depends(get_db)):
     if user_data.username != "" and user_data.password != "":
         headers = dict(request.headers)
         if 'content-length' in headers:
@@ -78,3 +78,110 @@ async def login(request: Request, db = Depends(get_db)):
         if 'content-length' in headers:
             headers.pop('content-length')
         return JSONResponse(content=content, status_code=status.HTTP_200_OK, headers=headers)
+    
+    
+
+@authRouter.post("/start")
+async def start(user_data : UserCreate, request: Request, background_tasks: BackgroundTasks, db = Depends(get_db)):
+    headers = dict(request.headers)
+    if 'content-length' in headers:
+        headers.pop('content-length')
+    if not all([user_data.username, user_data.password, user_data.rePassword, user_data.name]):
+        raise HTTPException(status_code=status.HTTP_206_PARTIAL_CONTENT, detail="Required Content Not Passed.", headers=headers)
+    if user_data.password != user_data.rePassword:
+        raise HTTPException(status_code=status.HTTP_206_PARTIAL_CONTENT, detail="Password Not Matched", headers=headers)
+    
+    conn = db
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL(f"""SELECT * FROM {SCHEMA}.users WHERE email=%s or username=%s"""),
+            [user_data.email, user_data.username]
+        )
+        USER_ = cur.fetchone()
+    
+    if USER_:
+        if not USER_['isactive']:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User Exists & Not Active: Please Verify Your Account!", headers=headers)
+        else:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Username Already Exists", headers=headers)
+    
+    verification_token = generate_verification_link(data=dict(user_data), Subject="Account Verification")
+    
+    hashed_password = do_password_hash(user_data.rePassword)
+
+    new_user = {
+        "name": user_data.name,
+        "email": user_data.email,
+        "password": hashed_password,
+        "is_verified": False,
+        "v_token": verification_token,
+        "origin_ip": request.client.host,
+        "v_endpoint": os.getenv("NEXT_PUBLIC_FRONTEND_ENDPOINT") + f"/verify?token={verification_token}",
+        "from": os.getenv("SENDER_IDENTITY_SSO")
+    }
+    
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("""
+                INSERT INTO {}.users (name, email, password, is_verified, v_token)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING *
+            """).format(sql.Identifier(SCHEMA)),
+            [new_user["name"], new_user["email"], new_user["password"], new_user["is_verified"], new_user["v_token"]]
+        )
+        isUserAddedToDb = cur.fetchone() is not None
+        conn.commit()
+    if isUserAddedToDb:
+            new_user_for_task = copy.deepcopy(new_user)
+            background_tasks.add_task(send_verification_email, new_user_for_task)
+    
+    # new_user.pop("v_endpoint") #REMOVE THIS IN PRODUCTION ENV
+    # new_user.pop("v_token") 
+    new_user.pop("password")
+    new_user.pop("from")
+    
+    return JSONResponse(content=new_user, status_code=status.HTTP_200_OK, headers=headers)
+
+@authRouter.get("/verify")
+async def verify(token: str, request:Request, db = Depends(get_db)):
+    # Verify the token
+    try:
+        user_data = decode_jwt_token(token)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+
+    # Check if the user exists in the database
+    conn = db
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("SELECT * FROM {}.users WHERE email=%s OR username=%s").format(sql.Identifier(SCHEMA)),
+            [user_data['email'], user_data['username']]
+        )
+        user = cur.fetchone()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Check if the user is already verified
+    if user['isactive'] and not user['is_verified']:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already verified")
+
+    # Update the user's verification status
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("""
+                UPDATE {}.users
+                SET is_verified = NULL, isactive = TRUE, v_token = NULL
+                WHERE email=%s OR username=%s
+            """).format(sql.Identifier(SCHEMA)),
+            [user_data['email'], user_data['username']]
+        )
+        conn.commit()
+
+    content = {
+        "email": user_data['email'],
+        "username" : user_data['username'],
+        "status" : "Verified"
+    }
+    
+    return JSONResponse(content=content, status_code=status.HTTP_200_OK, headers=dict(request.headers))

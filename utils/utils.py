@@ -38,12 +38,6 @@ def create_jwt(data: dict, Subject:str):
     token = jwt.encode(payload, os.getenv('JWT_SECRET_KEY'), algorithm=os.getenv('JWT_ALGORITHM'))
     return token
 
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
 def decode_jwt_token(token: str):
     try:
         payload = jwt.decode(token, os.getenv('JWT_SECRET_KEY'), algorithms=[os.getenv('JWT_ALGORITHM')])
@@ -61,15 +55,18 @@ def decode_jwt_token(token: str):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-
-
-def send_verification_email(email_to: str, verification_token: str, name : str):
+async def send_verification_email(data:dict):
     subject = "SingUp Verification ! - Verify Your Email"
-    body = f"Hi {name} \n\n Click the link to verify your email: \n\n {endPoint}/verify/user?token={verification_token}"
+    USER = data['name']
+    TOKEN_VERIFICATION_LINK = data['v_endpoint']
+    USER_MAIL = data['email']
+    ORIGIN_IP = data['origin_ip']
+    
+    body = f"Hi, {USER} \n\n We have received a account creation request from {ORIGIN_IP} for {USER_MAIL}.\n\n Click the below link to verify your account \n\n {TOKEN_VERIFICATION_LINK} \n\n If this is not you please avoid clicking the link."
     
     msg = MIMEMultipart()
-    msg['From'] = "PortalAuth"
-    msg['To'] = email_to
+    msg['From'] = data["from"]
+    msg['To'] = data['email']
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'plain'))
 
@@ -109,4 +106,12 @@ def sendMail(email_to: str, subject: str, body : str ):
         server.send_message(msg)
     return True
 
-
+def generate_verification_link(data:dict, Subject : str):
+    payload = {
+        "exp": datetime.datetime.now(IST) + datetime.timedelta(minutes=int(os.getenv("VERIFICATION_LINK_EXPIRE_MINUTE"))),  # Token expiration
+        "identifier": Subject,  # Subject of the token (user ID)
+        "username": data["username"],  # Additional data
+        "email": data["email"]  # Additional data
+    }
+    token = jwt.encode(payload, os.getenv('JWT_SECRET_KEY'), algorithm=os.getenv('JWT_ALGORITHM'))
+    return token

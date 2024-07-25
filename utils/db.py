@@ -29,17 +29,7 @@ def get_user(conn, user_id: int):
         cur.execute(sql.SQL(f"SELECT * FROM {SCHEMA}.users WHERE id = %s"), [user_id])
         return cur.fetchone()
 
-def create_user(conn, name: str, email: str, password: str):
-    with conn.cursor() as cur:
-        cur.execute(
-            sql.SQL(f"""
-                INSERT INTO {SCHEMA}.users (name, email, password)
-                VALUES (%s, %s, %s)
-                RETURNING *
-            """),
-            [name, email, password]
-        )
-        conn.commit()
+def create_user(conn, new_user:dict):
         return cur.fetchone()        
 
 def create_tables():

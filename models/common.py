@@ -26,8 +26,8 @@ class UserRemove(BaseModel):
     token : str | bool
 
 class UserCreate(BaseModel):
-    fname : str
-    lname : str
+    name : str
+    email : str
     username: str
     password: str
     rePassword : str
