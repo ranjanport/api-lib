@@ -32,6 +32,8 @@ class UserCreate(BaseModel):
     password: str
     rePassword : str
 
+class UserReset(BaseModel):
+    username : str
 
 class UserVerify(BaseModel):
     token: str
