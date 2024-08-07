@@ -30,6 +30,7 @@ def get_user(conn, user_id: int):
         return cur.fetchone()
 
 def create_user(conn, new_user:dict):
+    with conn.cursor() as cur:
         return cur.fetchone()        
 
 def create_tables():
