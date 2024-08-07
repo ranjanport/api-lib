@@ -4,7 +4,7 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 sys.path.append("..")
 
-from fastapi import APIRouter, Request, status,  Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from models import *
 import os
 
