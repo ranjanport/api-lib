@@ -76,6 +76,27 @@ async def send_verification_email(data:dict):
         server.send_message(msg)
     return True
 
+async def send_reset_link_email(data:dict):
+    subject = "Password Reset ! - Verify Your Email"
+    USER = data['name']
+    TOKEN_VERIFICATION_LINK = data['v_endpoint']
+    USER_MAIL = data['email']
+    ORIGIN_IP = data['origin_ip']
+    
+    body = f"Hi, {USER} \n\n We have received a Password Reset request from {ORIGIN_IP} for {USER_MAIL}.\n\n Click the below link which will redirect you to your account password recovery page \n\n {TOKEN_VERIFICATION_LINK} \n\n If this is not you please avoid clicking the link."
+    
+    msg = MIMEMultipart()
+    msg['From'] = data["from"]
+    msg['To'] = data['email']
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+
+    with smtplib.SMTP('smtp.gmail.com', 587) as server:
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.send_message(msg)
+    return True
+
 def resend_verification_email(email_to: str, verification_token: str):
     subject = "Account Verification : Verify Account"
     body = f"Click the link to verify your email: \n\n {endPoint}/verify/user?token={verification_token}"
