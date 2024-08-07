@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
 from models.common import *
-from utils.utils import create_jwt, verify_password, do_password_hash, decode_jwt_token, generate_verification_link, send_verification_email
+from utils.utils import create_jwt, verify_password, do_password_hash, decode_jwt_token, generate_verification_link, send_verification_email, send_reset_link_email
 from utils.db import *
 
 load_dotenv()
@@ -48,9 +48,8 @@ async def login(user_data: User, request: Request,  db = Depends(get_db)):
     else:
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username and Password must not be empty")
 
-
 @authRouter.post("/token/check")
-async def login(request: Request, db = Depends(get_db)):
+async def check_token(request: Request, db = Depends(get_db)):
     if not request.headers['token']:
         return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token Not Exists")
     if request.headers['token']:
@@ -78,11 +77,9 @@ async def login(request: Request, db = Depends(get_db)):
         if 'content-length' in headers:
             headers.pop('content-length')
         return JSONResponse(content=content, status_code=status.HTTP_200_OK, headers=headers)
-    
-    
 
 @authRouter.post("/start")
-async def start(user_data : UserCreate, request: Request, background_tasks: BackgroundTasks, db = Depends(get_db)):
+async def sign_up(user_data : UserCreate, request: Request, background_tasks: BackgroundTasks, db = Depends(get_db)):
     headers = dict(request.headers)
     if 'content-length' in headers:
         headers.pop('content-length')
@@ -135,15 +132,15 @@ async def start(user_data : UserCreate, request: Request, background_tasks: Back
             new_user_for_task = copy.deepcopy(new_user)
             background_tasks.add_task(send_verification_email, new_user_for_task)
     
-    # new_user.pop("v_endpoint") #REMOVE THIS IN PRODUCTION ENV
-    # new_user.pop("v_token") 
+    new_user.pop("v_endpoint") #REMOVE THIS IN PRODUCTION ENV
+    new_user.pop("v_token") 
     new_user.pop("password")
     new_user.pop("from")
     
     return JSONResponse(content=new_user, status_code=status.HTTP_200_OK, headers=headers)
 
 @authRouter.get("/verify")
-async def verify(token: str, request:Request, db = Depends(get_db)):
+async def verify_user_via_token(token: str, request:Request, db = Depends(get_db)):
     # Verify the token
     try:
         user_data = decode_jwt_token(token)
@@ -185,3 +182,46 @@ async def verify(token: str, request:Request, db = Depends(get_db)):
     }
     
     return JSONResponse(content=content, status_code=status.HTTP_200_OK, headers=dict(request.headers))
+
+@authRouter.post('/reset/password')
+async def reset_password(user_data: UserReset, request : Request, background_tasks: BackgroundTasks, db =Depends(get_db)):
+    if user_data.username:
+        headers = dict(request.headers)
+        if 'content-length' in headers:
+            headers.pop('content-length')
+        conn = db
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL(f"""SELECT * FROM {SCHEMA}.users WHERE email=%s or username=%s"""),
+                [user_data.username, user_data.username]
+            )
+            USER_ = cur.fetchone()
+        if not USER_:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Username Not Exists", headers=headers)
+        if USER_['isactive'] == False:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User Not Active : Plese Verify Your Account!", headers=headers)
+        
+        content = {
+            "status": "OK",
+            "status_code" : status.HTTP_200_OK,
+            "message": "If your email address exists in our database, you will receive a password recovery link at your email address in a few minutes.",
+            "ip" : request.client.host
+        }
+
+        reset_token = generate_verification_link(data=dict({"email":  USER_['email'], "username": USER_['username']}), Subject="Password Reset")
+        user_ = {
+            "name":  USER_['name'],
+            "email":  USER_['email'],
+            "username": USER_['username'],
+            "origin_ip": request.client.host,
+            "reset_link_token": reset_token,
+            "v_endpoint": os.getenv("NEXT_PUBLIC_RESET_ENDPOINT") + f"?token={reset_token}",
+            "from": os.getenv("SENDER_IDENTITY_SSO")
+        }
+        conn.close()
+        background_tasks.add_task(send_reset_link_email, user_)
+        return JSONResponse(content=content, status_code=status.HTTP_200_OK, headers=headers)
+    else:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username Can't be Empty")
+
+    
