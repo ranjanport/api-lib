@@ -40,7 +40,11 @@ def create_jwt(data: dict, Subject:str):
 
 def decode_jwt_token(token: str):
     try:
-        payload = jwt.decode(token, os.getenv('JWT_SECRET_KEY'), algorithms=[os.getenv('JWT_ALGORITHM')])
+        secret_key = os.getenv('JWT_SECRET_KEY')
+        algorithm = os.getenv('JWT_ALGORITHM')
+        if not secret_key or not algorithm:
+            raise ValueError("JWT_SECRET_KEY or JWT_ALGORITHM environment variable is not set")
+        payload = jwt.decode(token, secret_key, algorithms=[algorithm])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(
@@ -54,7 +58,11 @@ def decode_jwt_token(token: str):
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
+    except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            )
 async def send_verification_email(data:dict):
     subject = "SingUp Verification ! - Verify Your Email"
     USER = data['name']
