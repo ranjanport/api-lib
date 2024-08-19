@@ -50,33 +50,51 @@ async def login(user_data: User, request: Request,  db = Depends(get_db)):
 
 @authRouter.post("/token/check")
 async def check_token(request: Request, db = Depends(get_db)):
-    if not request.headers['token']:
-        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token Not Exists")
-    if request.headers['token']:
-        message = decode_jwt_token(request.headers['token'])
-    if message == {"error": "Invalid token"} or message == {"error": "Token has expired"}:
-        content = {
-                    "status": "ERROR",
-                    "status_code" : status.HTTP_403_FORBIDDEN,
-                    "isValid": False,
-                    "ip" : request.client.host
-                }
-        headers = dict(request.headers)
-        if 'content-length' in headers:
-            headers.pop('content-length')
-        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Token is either Expired or Invalid")
-        
-    elif message:
+    try:
+        token = request.headers.get('token')
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token Not Exists")
+
+        message = decode_jwt_token(token)
         content = {
             "status": "OK",
-            "status_code" : status.HTTP_200_OK,
+            "status_code": status.HTTP_200_OK,
             "isValid": True,
-            "ip" : request.client.host
+            "ip": request.client.host
         }
         headers = dict(request.headers)
         if 'content-length' in headers:
             headers.pop('content-length')
         return JSONResponse(content=content, status_code=status.HTTP_200_OK, headers=headers)
+
+    except HTTPException as e:
+        # Handle known HTTP exceptions
+        content = {
+            "status": "ERROR",
+            "status_code": e.status_code,
+            "detail": e.detail,
+            "isValid": False,
+            "ip": request.client.host
+        }
+        headers = dict(request.headers)
+        if 'content-length' in headers:
+            headers.pop('content-length')
+        return JSONResponse(content=content, status_code=e.status_code, headers=headers)
+
+    except Exception as e:
+        # Handle unexpected exceptions
+        content = {
+            "status": "ERROR",
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "detail": str(e),
+            "isValid": False,
+            "ip": request.client.host
+        }
+        headers = dict(request.headers)
+        if 'content-length' in headers:
+            headers.pop('content-length')
+        return JSONResponse(content=content, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, headers=headers)
+
 
 @authRouter.post("/start")
 async def sign_up(user_data : UserCreate, request: Request, background_tasks: BackgroundTasks, db = Depends(get_db)):
